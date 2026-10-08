@@ -209,7 +209,6 @@ cc_library {
         // compiled standalone.
         "backends/common-reloc.c",
         "backends/linux-core-note.c",
-        "backends/linux-perf-regs.c",
         "backends/x86_corenote.c",
         "backends/x86_initreg_sample.c",
     ],

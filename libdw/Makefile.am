@@ -103,7 +103,7 @@ $(srcdir)/known-dwarf.h: $(top_srcdir)/config/known-dwarf.awk $(srcdir)/dwarf.h
 endif
 
 libdw_pic_a_SOURCES =
-am_libdw_pic_a_OBJECTS = $(libdw_a_SOURCES:.c=.os)
+am_libdw_pic_a_OBJECTS = $(libdw_a_SOURCES:.c=_.os)
 
 libdw_so_LIBS = ../libebl/libebl_pic.a ../backends/libebl_backends_pic.a \
 		../libcpu/libcpu_pic.a libdw_pic.a ../libdwelf/libdwelf_pic.a \
@@ -168,7 +168,8 @@ MAINTAINERCLEANFILES = $(srcdir)/known-dwarf.h
 check_PROGRAMS = dwarf_srclang_check
 TESTS = $(check_PROGRAMS)
 
-CHECK_DEF_FLAGS = $(DEFS) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -DMAIN_CHECK=1
+CHECK_DEF_FLAGS = $(DEFS) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) \
+       $(DEFAULT_INCLUDES) -Wl,-rpath,../libelf -DMAIN_CHECK=1
 
 .SECONDEXPANSION:
 dwarf_srclang_check$(EXEEXT): $$(filter-out $$(subst _check,,$$@).o,$(libdw_a_OBJECTS)) $$(subst _check,,$$@).c

@@ -1,8 +1,8 @@
 dnl Process this file with autoconf to produce a configure script.
 dnl Configure input file for elfutils.                     -*-autoconf-*-
 dnl
-dnl Copyright (C) 1996-2019, 2024 Red Hat, Inc.
-dnl Copyright (C) 2022, 2023 Mark J. Wielaard <mark@klomp.org>
+dnl Copyright (C) 1996-2019, 2025 Red Hat, Inc.
+dnl Copyright (C) 2022, 2023, 2026 Mark J. Wielaard <mark@klomp.org>
 dnl
 dnl This file is part of elfutils.
 dnl
@@ -18,7 +18,7 @@ dnl  GNU General Public License for more details.
 dnl
 dnl  You should have received a copy of the GNU General Public License
 dnl  along with this program.  If not, see <http://www.gnu.org/licenses/>.
-AC_INIT([elfutils],[0.193],[https://sourceware.org/bugzilla],[elfutils],[http://elfutils.org/])
+AC_INIT([elfutils],[0.196],[https://sourceware.org/bugzilla],[elfutils],[http://elfutils.org/])
 
 LIBDEBUGINFOD_SONAME=libdebuginfod.so.1
 AC_SUBST([LIBDEBUGINFOD_SONAME])
@@ -39,7 +39,7 @@ fi
 AC_CONFIG_AUX_DIR([config])
 AC_CONFIG_FILES([config/Makefile])
 
-AC_COPYRIGHT([Copyright (C) 1996-2025 The elfutils developers.])
+AC_COPYRIGHT([Copyright (C) 1996-2026 The elfutils developers.])
 AC_PREREQ(2.69)			dnl Minimum Autoconf version required.
 
 dnl We use GNU make extensions; automake 1.10 defaults to -Wportability.
@@ -81,6 +81,11 @@ AS_IF([test "$use_locks" = yes],
       [AC_MSG_WARN([thread-safety is EXPERIMENTAL tests might fail.])])
 
 AH_TEMPLATE([USE_LOCKS], [Defined if libraries should be thread-safe.])
+
+AS_IF([test "$use_locks" = yes],
+      [eu_thread_safe="#define _ELFUTILS_THREAD_SAFE 1"],
+      [eu_thread_safe="/* _ELFUTILS_THREAD_SAFE is not defined.  */"])
+AC_SUBST([eu_thread_safe])
 
 # Provided by gnulib's m4/std-gnu11.m4 for autoconf pre 2.70
 AC_PROG_CC
@@ -279,6 +284,32 @@ case "$CFLAGS" in
     ;;
 esac
 
+AC_CACHE_CHECK(
+  [for openat2 with RESOLVE_IN_ROOT support],
+  [eu_cv_openat2_RESOLVE_IN_ROOT],
+  [AC_LINK_IFELSE(
+    [AC_LANG_PROGRAM(
+      [[#define _GNU_SOURCE
+        #include <fcntl.h>
+        #include <stdlib.h>
+        #include <unistd.h>
+        #include <sys/syscall.h>
+        #include <linux/openat2.h>
+        #include <stdio.h>
+      ]], [[
+        struct open_how how = { .flags = O_RDONLY|O_DIRECTORY, .resolve = RESOLVE_IN_ROOT };
+        int dfd = open (".", O_PATH);
+        return syscall (SYS_openat2, dfd, ".", &how, sizeof(how)) < 0;
+      ]]
+    )],
+    [eu_cv_openat2_RESOLVE_IN_ROOT=yes],
+    [eu_cv_openat2_RESOLVE_IN_ROOT=no]
+  )]
+)
+AS_IF([test "x$eu_cv_openat2_RESOLVE_IN_ROOT" = xyes],
+      [AC_DEFINE([HAVE_OPENAT2_RESOLVE_IN_ROOT], [1], [Define if openat2 is available])]
+)
+
 dnl enable debugging of branch prediction.
 AC_ARG_ENABLE([debugpred],
 AS_HELP_STRING([--enable-debugpred],[build binaries with support to debug branch prediction]),
@@ -379,6 +410,18 @@ fi
 AM_CONDITIONAL(USE_VALGRIND, test "$use_valgrind" = yes -o "$use_helgrind" = yes)
 AM_CONDITIONAL(USE_HELGRIND, test "$use_helgrind" = yes)
 
+HELGRIND_TRACK_DESTROY=
+if test "$use_helgrind" = yes; then
+  AC_MSG_CHECKING([whether helgrind supports --track-destroy])
+  if valgrind --tool=helgrind --help | grep -qe "--track-destroy"; then
+    HELGRIND_TRACK_DESTROY="--track-destroy=yes"
+    AC_MSG_RESULT([yes])
+  else
+    AC_MSG_RESULT([no])
+  fi
+fi
+AC_SUBST([HELGRIND_TRACK_DESTROY])
+
 AC_ARG_WITH([valgrind],
 AS_HELP_STRING([--with-valgrind],[include directory for Valgrind headers]),
 [with_valgrind_headers=$withval], [with_valgrind_headers=no])
@@ -469,7 +512,7 @@ AM_CONDITIONAL(USE_ZSTD_COMPRESS, test "x$with_zstd_compress" = "xyes")
 AS_IF([test "x$with_zstd_compress" = "xyes"],
       [AC_DEFINE([USE_ZSTD_COMPRESS], [1], [zstd compression support])])
 
-AC_CHECK_DECLS([memrchr, rawmemchr],[],[],
+AC_CHECK_DECLS([memrchr],[],[],
                [#define _GNU_SOURCE
                 #include <string.h>])
 AC_CHECK_DECLS([powerof2],[],[],[#include <sys/param.h>])
@@ -479,6 +522,13 @@ AC_CHECK_DECLS([mempcpy],[],[],
 AC_CHECK_DECLS([reallocarray],[],[],
                [#define _GNU_SOURCE
                 #include <stdlib.h>])
+
+dnl for xmkstemp we need a random source
+AC_CHECK_DECLS([getentropy],[],[],
+	       [#include <unistd.h>])
+AC_CHECK_HEADERS([sys/random.h])
+AC_CHECK_DECLS([getrandom],[],[],
+	       [#include <sys/random.h>])
 
 AC_CHECK_FUNCS([process_vm_readv mremap])
 
@@ -638,6 +688,36 @@ AC_COMPILE_IFELSE([AC_LANG_SOURCE([])],
 CFLAGS="$old_CFLAGS"])
 AM_CONDITIONAL(HAVE_USE_AFTER_FREE3_WARNING,
 	       [test "x$ac_cv_use_after_free3" != "xno"])
+
+AC_CACHE_CHECK([whether the compiler accepts -Wmissing-parameter-name], ac_cv_missing_parameter_name, [dnl
+old_CFLAGS="$CFLAGS"
+CFLAGS="$CFLAGS -Wmissing-parameter-name -Werror"
+AC_COMPILE_IFELSE([AC_LANG_SOURCE([])],
+		  ac_cv_missing_parameter_name=yes,
+		  ac_cv_missing_parameter_name=no)
+CFLAGS="$old_CFLAGS"])
+AM_CONDITIONAL(HAVE_MISSING_PARAMETER_NAME_WARNING,
+	       [test "x$ac_cv_missing_parameter_name" != "xno"])
+
+AC_CACHE_CHECK([whether the compiler accepts -Wdeprecated-non-prototype], ac_cv_deprecated_non_prototype, [dnl
+old_CFLAGS="$CFLAGS"
+CFLAGS="$CFLAGS -Wdeprecated-non-prototype -Werror"
+AC_COMPILE_IFELSE([AC_LANG_SOURCE([])],
+		  ac_cv_deprecated_non_prototype=yes,
+		  ac_cv_deprecated_non_prototype=no)
+CFLAGS="$old_CFLAGS"])
+AM_CONDITIONAL(HAVE_DEPRECATED_NON_PROTOTYPE_WARNING,
+	       [test "x$ac_cv_deprecated_non_prototype" != "xno"])
+
+AC_CACHE_CHECK([whether the compiler accepts -Wfree_labels], ac_cv_free_labels, [dnl
+old_CFLAGS="$CFLAGS"
+CFLAGS="$CFLAGS -Wfree-labels -Werror"
+AC_COMPILE_IFELSE([AC_LANG_SOURCE([])],
+		  ac_cv_free_labels=yes,
+		  ac_cv_free_labels=no)
+CFLAGS="$old_CFLAGS"])
+AM_CONDITIONAL(HAVE_FREE_LABELS_WARNING,
+	       [test "x$ac_cv_free_labels" != "xno"])
 
 AC_CACHE_CHECK([whether the compiler accepts -fno-addrsig], ac_cv_fno_addrsig, [dnl
 old_CFLAGS="$CFLAGS"
@@ -832,10 +912,66 @@ fi
 AC_CHECK_PROG(HAVE_ZSTD, zstd, yes, no)
 AM_CONDITIONAL([HAVE_ZSTD],[test "x$HAVE_ZSTD" = "xyes"])
 
-# For tests that need to use C++11
-AX_CXX_COMPILE_STDCXX(11, noext, optional)
+# For tests and programs that need to use C++20
+AX_CXX_COMPILE_STDCXX(20, noext, optional)
+AS_IF([test "x$HAVE_CXX20" = "x1"], [HAVE_CXX20=yes], [HAVE_CXX20=no])
+AM_CONDITIONAL([HAVE_CXX20],[test "x$HAVE_CXX20" = "xyes"])
+
+AS_IF([test "x$HAVE_CXX20" = "xno"], [
+  # For tests that need to use C++11, when C++20 is unavailable
+  AX_CXX_COMPILE_STDCXX(11, noext, optional)
+])
 AS_IF([test "x$HAVE_CXX11" = "x1"], [HAVE_CXX11=yes], [HAVE_CXX11=no])
 AM_CONDITIONAL([HAVE_CXX11],[test "x$HAVE_CXX11" = "xyes"])
+
+# Look for debuginfod & stackprof dependencies, minimum versions as per rhel7.
+PKG_PROG_PKG_CONFIG
+PKG_CHECK_MODULES([libcurl],[libcurl >= 7.29.0],[have_libcurl=yes],[have_libcurl=no])
+PKG_CHECK_MODULES([jsonc],[json-c >= 0.11],[have_jsonc=yes],[have_jsonc=no])
+
+# For eu-stackprof
+AC_ARG_ENABLE([stackprof],[AS_HELP_STRING([--enable-stackprof], [Build eu-stackprof])],
+  [], [enable_stackprof=auto])
+# optional:
+AC_CHECK_HEADERS([perfmon/pfmlib_perf_event.h])
+AM_CONDITIONAL([HAVE_LIBPFM], [test "x${ac_cv_header_perfmon_pfmlib_perf_event_h}" = "xyes" ])
+AC_CHECK_LIB(pfm, pfm_get_os_event_encoding, [AC_SUBST(libpfm_LIBS, '-lpfm')])
+# required:
+AC_CHECK_HEADERS([linux/perf_event.h])
+AC_CHECK_MEMBER([struct perf_event_attr.build_id],
+  [have_perf_event_attr_build_id=yes],
+  [have_perf_event_attr_build_id=no],
+  [[#include <linux/perf_event.h>]])
+HAVE_CXX20_FORMAT=no
+AS_IF([test "x$HAVE_CXX20" = "xyes"], [
+  old_CXXFLAGS="$CXXFLAGS"
+  CXXFLAGS="$CXXFLAGS -std=c++20"
+  AC_LANG_PUSH([C++])
+  AC_CACHE_CHECK([for c++20 format.h], ac_cv_have_cxx20_format_h,
+    [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([#include <format>])],
+               ac_cv_have_cxx20_format_h=yes, ac_cv_have_cxx20_format_h=no)])
+  AC_LANG_POP
+  CXXFLAGS="$old_CXXFLAGS"
+])
+case $host_cpu in
+  i?86|x86_64|amd64|arm*|aarch64*)
+    stackprof_arch_supported=yes
+    ;;
+  *)
+    stackprof_arch_supported=no
+    ;;
+esac
+if test "x$enable_stackprof" = "xno"; then
+   true
+elif test "x${stackprof_arch_supported}x${ac_cv_header_linux_perf_event_h}x${have_perf_event_attr_build_id}x${have_jsonc}x${ac_cv_have_cxx20_format_h}x${HAVE_CXX20}" = "xyesxyesxyesxyesxyesxyes"; then
+   enable_stackprof=yes
+elif test "x$enable_stackprof" = "xyes"; then
+   AC_MSG_ERROR([Unable to build eu-stackprof, unsupported host cpu or missing linux <perf_event.h> with build_id or C++20 with <format.h>])
+else
+   enable_stackprof=no
+fi
+AM_CONDITIONAL([ENABLE_STACKPROF],[test "x$enable_stackprof" = "xyes"])
+AS_IF([test "x$enable_stackprof" = "xyes"],[AC_DEFINE([ENABLE_STACKPROF], [1], [Build eu-stackprof])])
 
 AC_CHECK_HEADERS([execinfo.h])
 
@@ -845,11 +981,6 @@ AC_CHECK_HEADERS([execinfo.h])
 AC_ARG_ENABLE([libdebuginfod],[AS_HELP_STRING([--enable-libdebuginfod], [Build debuginfod client library (can be =dummy)])])
 AC_ARG_ENABLE([debuginfod],[AS_HELP_STRING([--enable-debuginfod], [Build debuginfod server])])
 AC_ARG_ENABLE([debuginfod-ima-verification],[AS_HELP_STRING([--enable-debuginfod-ima-verification],[enable per-file signature verification])])
-#
-# Look for various packages, minimum versions as per rhel7.
-PKG_PROG_PKG_CONFIG
-PKG_CHECK_MODULES([libcurl],[libcurl >= 7.29.0],[have_libcurl=yes],[have_libcurl=no])
-PKG_CHECK_MODULES([jsonc],[json-c >= 0.11],[have_jsonc=yes],[have_jsonc=no])
 #
 # pronounce judgement on ability to build client, overridden by =yes/=no
 if test "x$enable_libdebuginfod" = "xno"; then
@@ -866,12 +997,28 @@ fi
 PKG_CHECK_MODULES([libmicrohttpd],[libmicrohttpd >= 0.9.33],[],[enable_debuginfod=no])
 PKG_CHECK_MODULES([oldlibmicrohttpd],[libmicrohttpd < 0.9.51],[old_libmicrohttpd=yes],[old_libmicrohttpd=no])
 PKG_CHECK_MODULES([sqlite3],[sqlite3 >= 3.7.17],[have_sqlite3=yes],[have_sqlite3=no])
-PKG_CHECK_MODULES([libarchive],[libarchive >= 3.1.2],[have_libarchive=yes],[have_libarchive=no])
+#
+# Check for libarchive unless its usage is disabled.
+AC_ARG_WITH([libarchive],
+  [AS_HELP_STRING([--with-libarchive],
+                  [use libarchive])],
+  [], [with_libarchive=auto])
+have_libarchive=no
+AS_IF([test "x$with_libarchive" != "xno"], [
+  PKG_CHECK_MODULES([libarchive], [libarchive >= 3.1.2],
+    [have_libarchive=yes],
+    [have_libarchive=no])
+])
+AS_IF([test "x$with_libarchive" = "xyes" -a "x$have_libarchive" != "xyes"], [
+  AC_MSG_ERROR([--with-libarchive was given, but libarchive >= 3.1.2 not found])
+])
 #
 # pronounce judgement on ability to build server, overridden by =yes/=no
 if test "x$enable_debuginfod" = "xno"; then
    true
 elif test "x$have_jsonc$HAVE_CXX11$have_libarchive$have_sqlite3" = "xyesyesyesyes"; then
+   enable_debuginfod=yes
+elif test "x$have_jsonc$HAVE_CXX20$have_libarchive$have_sqlite3" = "xyesyesyesyes"; then
    enable_debuginfod=yes
 elif test "x$enable_debuginfod" = "xyes"; then
    AC_MSG_ERROR([unable to build debuginfod, missing libmicrohttpd, sqlite3 or libarchive])
@@ -931,59 +1078,6 @@ AC_ARG_ENABLE(debuginfod-ima-cert-path,
 AC_SUBST(DEBUGINFOD_IMA_CERT_PATH, $default_debuginfod_ima_cert_path)
 AC_CONFIG_FILES([config/profile.sh config/profile.csh config/profile.fish])
 
-# XXX Currently, eu-stacktrace can only work with sysprof/x86, hence:
-AC_ARG_ENABLE([stacktrace],AS_HELP_STRING([--enable-stacktrace], [Enable eu-stacktrace]))
-# check for x86, or more precisely _ASM_X86_PERF_REGS_H
-AS_IF([test "x$enable_stacktrace" = "xyes"], [
-   enable_stacktrace=no
-   AC_LANG([C])
-   AC_CACHE_CHECK([for _ASM_X86_PERF_REGS_H], ac_cv_has_asm_x86_perf_regs_h,
-      [AC_COMPILE_IFELSE([AC_LANG_SOURCE([
-#include <asm/perf_regs.h>
-#ifndef _ASM_X86_PERF_REGS_H
-#error "_ASM_X86_PERF_REGS_H not found"
-#endif
-])], ac_cv_has_asm_x86_perf_regs_h=yes, ac_cv_has_asm_x86_perf_regs_h=no)])
-   AS_IF([test "x$ac_cv_has_asm_x86_perf_regs_h" = xyes], [
-      enable_stacktrace=yes
-   ])
-   if test "x$enable_stacktrace" = "xno"; then
-      AC_MSG_ERROR([${program_prefix}stacktrace currently only supports x86, use --disable-stacktrace to disable.])
-   fi
-])
-# check for sysprof headers:
-AS_IF([test "x$enable_stacktrace" = "xyes"], [
-   enable_stacktrace=no
-   AC_CACHE_CHECK([for sysprof-6/sysprof-capture-types.h], ac_cv_has_sysprof_6_headers,
-      [AC_COMPILE_IFELSE([AC_LANG_SOURCE([[#include <sysprof-6/sysprof-capture-types.h>]])],
-      ac_cv_has_sysprof_6_headers=yes, ac_cv_has_sysprof_6_headers=no)])
-   AS_IF([test "x$ac_cv_has_sysprof_6_headers" = xyes], [
-      AC_DEFINE(HAVE_SYSPROF_6_HEADERS)
-      enable_stacktrace=yes
-   ])
-   AH_TEMPLATE([HAVE_SYSPROF_6_HEADERS], [Define to 1 if `sysprof-6/sysprof-capture-types.h` is provided by the system, 0 otherwise.])
-   AC_CACHE_CHECK([for sysprof-4/sysprof-capture-types.h], ac_cv_has_sysprof_4_headers,
-      [AC_COMPILE_IFELSE([AC_LANG_SOURCE([[#include <sysprof-4/sysprof-capture-types.h>]])],
-      ac_cv_has_sysprof_4_headers=yes, ac_cv_has_sysprof_4_headers=no)])
-   AS_IF([test "x$ac_cv_has_sysprof_4_headers" = xyes], [
-      AC_DEFINE(HAVE_SYSPROF_4_HEADERS)
-      enable_stacktrace=yes
-   ])
-   AH_TEMPLATE([HAVE_SYSPROF_4_HEADERS], [Define to 1 if `sysprof-4/sysprof-capture-types.h` is provided by the system, 0 otherwise.])
-   if test "x$enable_stacktrace" = "xno"; then
-      AC_MSG_ERROR([sysprof headers for ${program_prefix}stacktrace not found, use --disable-stacktrace to disable.])
-   fi
-],[
-   # If eu-stacktrace is disabled, also disable the automake conditionals:
-   ac_cv_has_sysprof_6_headers=no
-   ac_cv_has_sysprof_4_headers=no
-   # And make sure the feature listing shows 'no':
-   enable_stacktrace=no
-])
-AM_CONDITIONAL([HAVE_SYSPROF_6_HEADERS],[test "x$ac_cv_has_sysprof_6_headers" = xyes])
-AM_CONDITIONAL([HAVE_SYSPROF_4_HEADERS],[test "x$ac_cv_has_sysprof_4_headers" = xyes])
-AM_CONDITIONAL([ENABLE_STACKTRACE],[test "x$enable_stacktrace" = "xyes"])
-
 AC_OUTPUT
 
 AC_MSG_NOTICE([
@@ -1021,14 +1115,15 @@ AC_MSG_NOTICE([
     libdebuginfod client support       : ${enable_libdebuginfod}
     Debuginfod server support          : ${enable_debuginfod}
     Default DEBUGINFOD_URLS            : ${default_debuginfod_urls}
-    Debuginfod RPM sig checking        : ${enable_debuginfod_ima_verification} 
+    Debuginfod RPM sig checking        : ${enable_debuginfod_ima_verification}
     Default DEBUGINFOD_IMA_CERT_PATH   : ${default_debuginfod_ima_cert_path}
-    ${program_prefix}stacktrace support              : ${enable_stacktrace}
+    ${program_prefix}stackprof support               : ${enable_stackprof}
 
   EXTRA TEST FEATURES (used with make check)
     have bunzip2 installed (required)  : ${HAVE_BUNZIP2}
     have zstd installed                : ${HAVE_ZSTD}
     C++11                              : ${HAVE_CXX11}
+    C++20                              : ${HAVE_CXX20}
     debug branch prediction            : ${use_debugpred}
     gprof support                      : ${use_gprof}
     gcov support                       : ${use_gcov}

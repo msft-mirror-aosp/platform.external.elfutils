@@ -1,6 +1,7 @@
 ## Process this file with automake to create Makefile.in
 ##
 ## Copyright (C) 1996-2010, 2015 Red Hat, Inc.
+## Copyright (C) 2025 Mark J. Wielaard <mark@klomp.org>
 ## This file is part of elfutils.
 ##
 ## This file is free software; you can redistribute it and/or modify
@@ -103,7 +104,7 @@ libelf_a_SOURCES = elf_version.c elf_hash.c elf_error.c elf_fill.c \
 		   elf_compress.c elf_compress_gnu.c
 
 libelf_pic_a_SOURCES =
-am_libelf_pic_a_OBJECTS = $(libelf_a_SOURCES:.c=.os)
+am_libelf_pic_a_OBJECTS = $(libelf_a_SOURCES:.c=_.os)
 
 libelf_so_DEPS = ../lib/libeu.a
 libelf_so_LDLIBS = $(libelf_so_DEPS) -lz $(zstd_LIBS)
@@ -145,3 +146,15 @@ libelf.manifest: $(libelf_a_OBJECTS)
 
 MOSTLYCLEANFILES = $(am_libelf_a_OBJECTS) $(am_libelf_pic_a_OBJECTS) libelf.so.$(VERSION)
 CLEANFILES = libelf.so $(EXTRA_libelf_a_DEPENDENCIES)
+
+# Internal checks
+check_PROGRAMS = gelf_fsize_check
+TESTS = $(check_PROGRAMS)
+
+CHECK_DEF_FLAGS = $(DEFS) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) \
+       $(DEFAULT_INCLUDES) -Wl,-rpath,../libelf -DMAIN_CHECK=1
+
+.SECONDEXPANSION:
+gelf_fsize_check$(EXEEXT): $$(filter-out $$(subst _check,,$$@).o,$(libelf_a_OBJECTS)) $$(subst _check,,$$@).c
+	$(AM_V_CC)$(CC) $(CHECK_DEF_FLAGS) -o $@ $^ $(filter-out libelf_pic.a,$(libelf_so_LIBS)) $(libelf_so_LDLIBS)
+nodist_gelf_fsize_check_SOURCES = gelf_fsize_check.c

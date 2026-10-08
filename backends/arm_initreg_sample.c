@@ -1,5 +1,5 @@
-/* Common pieces for handling registers in a linux perf_events sample.
-   Copyright (C) 2025 Red Hat, Inc.
+/* Populate process registers from a register sample.
+   Copyright (C) 2026 Red Hat Inc.
    This file is part of elfutils.
 
    This file is free software; you can redistribute it and/or modify
@@ -26,23 +26,26 @@
    the GNU Lesser General Public License along with this program.  If
    not, see <http://www.gnu.org/licenses/>.  */
 
-static Dwarf_Word
-perf_sample_find_reg (const Dwarf_Word *regs, uint32_t n_regs,
-		      uint64_t regs_mask,
-		      int target)
+#ifdef HAVE_CONFIG_H
+# include <config.h>
+#endif
+
+#define BACKEND arm_
+#include "libebl_CPU.h"
+#include "libebl_PERF_FLAGS.h"
+
+bool
+arm_sample_sp_pc (const Dwarf_Word *regs, uint32_t n_regs,
+		  const int *regs_mapping, size_t n_regs_mapping,
+		  Dwarf_Word *sp, Dwarf_Word *pc)
 {
-  int j, k; uint64_t bit;
-  for (j = 0, k = 0, bit = 1; k < PERF_REG_X86_64_MAX; k++, bit <<= 1)
-    {
-      if (bit & regs_mask) {
-	if (n_regs <= (uint32_t) j)
-	  return 0; /* regs_mask count doesn't match n_regs */
-	if (k == target)
-	  return regs[j];
-	if (k > target)
-	  return 0; /* regs_mask doesn't include desired reg */
-	j++;
-      }
-    }
-  return 0;
+  return generic_sample_sp_pc (regs, n_regs, regs_mapping, n_regs_mapping,
+			       sp, 13 /* index of sp in dwarf_regs */,
+			       pc, 15 /* index of pc in dwarf_regs */);
 }
+
+/* XXX The default ebl_set_initial_registers_sample implementation can
+   be used -- whereas the ptrace code in arm_initreg.c has to unpack a
+   register file of 32-bit words into a Dwarf_Word array, here we
+   should already be provided an appropriately-packed array
+   originating from perf_events.  */

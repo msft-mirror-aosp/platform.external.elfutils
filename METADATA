@@ -7,21 +7,21 @@ description: "elfutils is a collection of utilities and libraries to read, creat
 third_party {
   license_type: RESTRICTED
   security {
-    tag: "NVD-CPE2.3:cpe:/a:elfutils_project:elfutils:0.193"
     tag: "android:on_device_usage"
     tag: "android:privilege_level:privileged"
     tag: "android:untrusted_input"
+    tag: "NVD-CPE2.3:cpe:/a:elfutils_project:elfutils:0.196"
   }
   last_upgrade_date {
-    year: 2025
-    month: 7
-    day: 2
+    year: 2026
+    month: 10
+    day: 8
   }
   homepage: "https://sourceware.org/elfutils/"
   identifier {
     type: "Git"
     value: "git://sourceware.org/git/elfutils.git"
-    version: "853c2943b582ac65fda6c28eaea21a1595fbaecd"
-    closest_version: "elfutils-0.193"
+    version: "62563002d86d182bbf6a9689983629aaa075f505"
+    closest_version: "elfutils-0.196"
   }
 }
