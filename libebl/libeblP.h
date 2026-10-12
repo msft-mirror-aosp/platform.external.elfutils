@@ -1,5 +1,5 @@
 /* Internal definitions for interface for libebl.
-   Copyright (C) 2000-2009, 2013, 2014, 2025 Red Hat, Inc.
+   Copyright (C) 2000-2009, 2013, 2014, 2025-2026 Red Hat, Inc.
    This file is part of elfutils.
 
    This file is free software; you can redistribute it and/or modify
@@ -65,6 +65,13 @@ struct ebl
      perf_events sample data iff PERF_FRAME_REGS_MASK > 0.  */
   uint64_t perf_frame_regs_mask;
 
+  /* A cached mapping from a specified linux perf_events regs_mask to
+     the corresponding regs_mapping array, to reduce
+     ebl_sample_perf_regs_mapping() recomputations.  */
+  uint64_t cached_perf_regs_mask;
+  int *cached_regs_mapping;
+  size_t cached_n_regs_mapping;
+
   /* Offset to apply to the value of the return_address_register, as
      fetched from a Dwarf CFI.  This is used by some backends, where
      the return_address_register actually contains the call
@@ -89,6 +96,9 @@ struct ebl
    initialize for the given Elf or machine.  */
 typedef Ebl *(*ebl_bhinit_t) (Elf *, GElf_Half, Ebl *);
 
+/* Additional helper to init cached perf_events mapping data.  */
+void __libebl_init_cached_regs_mapping (Ebl *ebl)
+  internal_function;
 
 /* LEB128 constant helper macros.  */
 #define ULEB128_7(x)	(BUILD_BUG_ON_ZERO ((x) >= (1U << 7)) + (x))

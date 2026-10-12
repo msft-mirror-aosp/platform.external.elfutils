@@ -34,6 +34,12 @@
 
 #include <fcntl.h>
 
+#ifdef HAVE_OPENAT2_RESOLVE_IN_ROOT
+#include <linux/openat2.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#endif
+
 /* This element is always provided and always has a constant value.
    This makes it an easy thing to scan for to discern the format.  */
 #define PROBE_TYPE	AT_PHENT
@@ -399,8 +405,8 @@ report_r_debug (uint_fast8_t elfclass, uint_fast8_t elfdata,
 	  r_debug_info_module = malloc (sizeof (*r_debug_info_module)
 					+ strlen (name1) + 1);
 	  if (unlikely (r_debug_info_module == NULL))
-	    release_buffer (&memory_closure, &buffer,
-                            &buffer_available, result);
+	    return release_buffer (&memory_closure, &buffer,
+				   &buffer_available, -1);
 	  r_debug_info_module->fd = -1;
 	  r_debug_info_module->elf = NULL;
 	  r_debug_info_module->l_ld = l_ld;
@@ -418,6 +424,7 @@ report_r_debug (uint_fast8_t elfclass, uint_fast8_t elfdata,
 	  /* This code is mostly inlined dwfl_report_elf.  */
 	  char *sysroot_name = NULL;
 	  const char *sysroot = dwfl->sysroot;
+	  int fd;
 
 	  /* Don't use the sysroot if the path is already inside it.  */
 	  bool name_in_sysroot = sysroot && startswith (name, sysroot);
@@ -427,10 +434,41 @@ report_r_debug (uint_fast8_t elfclass, uint_fast8_t elfdata,
 	      if (asprintf (&sysroot_name, "%s%s", sysroot, name) < 0)
 		return release_buffer (&memory_closure, &buffer, &buffer_available, -1);
 
+#ifdef HAVE_OPENAT2_RESOLVE_IN_ROOT
+	      /* The original name does not contain the sysroot as a prefix.
+		 Save this for use with openat2.  */
+	      const char *name_no_sysroot = name;
+#endif
 	      name = sysroot_name;
-	    }
 
-	  int fd = open (name, O_RDONLY);
+#ifdef HAVE_OPENAT2_RESOLVE_IN_ROOT
+	      int sysrootfd, err;
+
+	      struct open_how how = {
+		.flags = O_RDONLY,
+		.resolve = RESOLVE_IN_ROOT,
+	      };
+
+	      sysrootfd = open (sysroot, O_DIRECTORY|O_PATH);
+	      if (sysrootfd < 0)
+		return -1;
+
+	      fd = syscall (SYS_openat2, sysrootfd, name_no_sysroot,
+			    &how, sizeof(how));
+	      err = fd < 0 ? -errno : 0;
+
+	      close (sysrootfd);
+
+	      /* Fallback to regular open() if openat2 is not available. */
+	      if (fd < 0 && err == -ENOSYS)
+#endif
+		{
+		  fd = open (name, O_RDONLY);
+		}
+	    }
+	  else
+	      fd = open (name, O_RDONLY);
+
 	  if (fd >= 0)
 	    {
 	      Elf *elf;

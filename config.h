@@ -23,6 +23,9 @@
    language is requested. */
 #define ENABLE_NLS 1
 
+/* Build eu-stackprof */
+/* #undef ENABLE_STACKPROF */
+
 /* Define to 1 if you have the Mac OS X function
    CFLocaleCopyPreferredLanguages in the CoreFoundation framework. */
 /* #undef HAVE_CFLOCALECOPYPREFERREDLANGUAGES */
@@ -32,11 +35,30 @@
 /* #undef HAVE_CFPREFERENCESCOPYAPPVALUE */
 
 /* define if the compiler supports basic C++11 syntax */
-#define HAVE_CXX11 1
+/* #undef HAVE_CXX11 */
+
+/* define if the compiler supports basic C++20 syntax */
+#define HAVE_CXX20 1
 
 /* Define if the GNU dcgettext() function is already present or preinstalled.
    */
 #define HAVE_DCGETTEXT 1
+
+/* Define to 1 if you have the declaration of 'getentropy', and to 0 if you
+   don't. */
+#if defined(__ANDROID__) || defined(ANDROID_HOST_MUSL)
+#define HAVE_DECL_GETENTROPY 1
+#else
+#define HAVE_DECL_GETENTROPY 0
+#endif
+
+/* Define to 1 if you have the declaration of 'getrandom', and to 0 if you
+   don't. */
+#if defined(__ANDROID__) || defined(ANDROID_HOST_MUSL)
+#define HAVE_DECL_GETRANDOM 1
+#else
+#define HAVE_DECL_GETRANDOM 0
+#endif
 
 /* Define to 1 if you have the declaration of 'mempcpy', and to 0 if you
    don't. */
@@ -49,10 +71,6 @@
 /* Define to 1 if you have the declaration of 'powerof2', and to 0 if you
    don't. */
 #define HAVE_DECL_POWEROF2 1
-
-/* Define to 1 if you have the declaration of 'rawmemchr', and to 0 if you
-   don't. */
-#define HAVE_DECL_RAWMEMCHR 1
 
 /* Define to 1 if you have the declaration of 'reallocarray', and to 0 if you
    don't. */
@@ -94,6 +112,9 @@
 /* Define to 1 if libarchive is available */
 /* #undef HAVE_LIBARCHIVE */
 
+/* Define to 1 if you have the <linux/perf_event.h> header file. */
+#define HAVE_LINUX_PERF_EVENT_H 1
+
 /* Define to 1 if you have the <malloc.h> header file. */
 #define HAVE_MALLOC_H 1
 
@@ -102,6 +123,12 @@
 
 /* Define to 1 if you have the 'mremap' function. */
 #define HAVE_MREMAP 1
+
+/* Define if openat2 is available */
+#define HAVE_OPENAT2_RESOLVE_IN_ROOT 1
+
+/* Define to 1 if you have the <perfmon/pfmlib_perf_event.h> header file. */
+/* #undef HAVE_PERFMON_PFMLIB_PERF_EVENT_H */
 
 /* Define to 1 if you have the 'process_vm_readv' function. */
 #define HAVE_PROCESS_VM_READV 1
@@ -136,13 +163,10 @@
 /* Define to 1 if you have the <string.h> header file. */
 #define HAVE_STRING_H 1
 
-/* Define to 1 if `sysprof-4/sysprof-capture-types.h` is provided by the
-   system, 0 otherwise. */
-/* #undef HAVE_SYSPROF_4_HEADERS */
-
-/* Define to 1 if `sysprof-6/sysprof-capture-types.h` is provided by the
-   system, 0 otherwise. */
-/* #undef HAVE_SYSPROF_6_HEADERS */
+/* Define to 1 if you have the <sys/random.h> header file. */
+#if defined(__ANDROID__) || defined(ANDROID_HOST_MUSL)
+#define HAVE_SYS_RANDOM_H 1
+#endif
 
 /* Define to 1 if you have the <sys/resource.h> header file. */
 #define HAVE_SYS_RESOURCE_H 1
@@ -175,7 +199,7 @@
 #define PACKAGE_NAME "elfutils"
 
 /* Define to the full name and version of this package. */
-#define PACKAGE_STRING "elfutils 0.193"
+#define PACKAGE_STRING "elfutils 0.196"
 
 /* Define to the one symbol short name of this package. */
 #define PACKAGE_TARNAME "elfutils"
@@ -184,7 +208,7 @@
 #define PACKAGE_URL "http://elfutils.org/"
 
 /* Define to the version of this package. */
-#define PACKAGE_VERSION "0.193"
+#define PACKAGE_VERSION "0.196"
 
 /* The size of 'long', as computed by sizeof. */
 #define SIZEOF_LONG 8
@@ -221,7 +245,7 @@
 #define USE_ZSTD_COMPRESS 1
 
 /* Version number of package */
-#define VERSION "0.193"
+#define VERSION "0.196"
 
 /* Define to 1 if 'lex' declares 'yytext' as a 'char *' by default, not a
    'char[]'. */

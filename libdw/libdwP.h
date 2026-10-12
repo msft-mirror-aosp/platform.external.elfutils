@@ -32,8 +32,8 @@
 #include <stdbool.h>
 #include <pthread.h>
 
-#include <libdw.h>
-#include <dwarf.h>
+#include "libdw.h"
+#include "dwarf.h"
 #include "eu-search.h"
 
 
@@ -85,6 +85,8 @@ enum
     IDX_debug_rnglists,
     IDX_debug_cu_index,
     IDX_debug_tu_index,
+    IDX_debug_sup,
+    IDX_debug_dwp,
     IDX_gnu_debugaltlink,
     IDX_last
   };
@@ -154,15 +156,6 @@ enum
 
 #include "dwarf_sig8_hash.h"
 
-/* The type of Dwarf object, sorted by preference
-   (if there is a higher order type, we pick that one over the others).  */
-enum dwarf_type
-  {
-    TYPE_UNKNOWN = 0,
-    TYPE_GNU_LTO = 16,
-    TYPE_DWO = 32,
-    TYPE_PLAIN = 64,
-  };
 
 /* This is the structure representing the debugging state.  */
 struct Dwarf
@@ -257,7 +250,7 @@ struct Dwarf
   /* Similar for addrx/constx, which will come from .debug_addr section.  */
   struct Dwarf_CU *fake_addr_cu;
 
-  enum dwarf_type type;
+  Dwarf_Type type;
 
   /* Supporting lock for internal memory handling.  Ensures threads that have
      an entry in the mem_tails array are not disturbed by new threads doing
@@ -269,7 +262,7 @@ struct Dwarf
      __libdw_intern_next_unit.  */
   mutex_define(, dwarf_lock);
 
-  /* Synchronize access to dwarf_macro_getsrcfiles.  */
+  /* Synchronize access to dwarf_macro_getsrcfiles and cache_op_table.  */
   mutex_define(, macro_lock);
 
   /* Internal memory handling.  This is basically a simplified thread-local
@@ -455,13 +448,13 @@ struct Dwarf_CU
      Don't access directly, call __libdw_cu_locs_base.  */
   Dwarf_Off locs_base;
 
-  /* Synchronize access to the abbrev member of a Dwarf_Die that
-     refers to this Dwarf_CU.  Covers __libdw_die_abbrev. */
-  rwlock_define(, abbrev_lock);
-
   /* Synchronize access to the split member of this Dwarf_CU.
      Covers __libdw_find_split_unit.  */
   rwlock_define(, split_lock);
+
+  /* Synchronize access to the last_abbrev_offset member of a Dwarf_Die
+     that refers to this Dwarf_CU.  */
+  mutex_define(, abbrev_lock);
 
   /* Synchronize access to the lines and files members.
      Covers dwarf_getsrclines and dwarf_getsrcfiles.  */
@@ -470,6 +463,10 @@ struct Dwarf_CU
   /* Synchronize access to the str_off_base of this Dwarf_CU.
      Covers __libdw_str_offsets_base_off.  */
   mutex_define(, str_off_base_lock);
+
+  /* Synchronize access to is_constant_offset.  Should also be held
+     when calling __libdw_intern_expression with Dwarf_CU members.  */
+  mutex_define(, intern_lock);
 
   /* Memory boundaries of this CU.  */
   void *startp;
@@ -482,6 +479,8 @@ INTDECL (dwarf_attr)
 INTDECL (dwarf_attr_integrate)
 INTDECL (dwarf_begin)
 INTDECL (dwarf_begin_elf)
+INTDECL (dwarf_begin_elf_type)
+INTDECL (dwarf_begin_type)
 INTDECL (dwarf_child)
 INTDECL (dwarf_cu_dwp_section_info)
 INTDECL (dwarf_default_lower_bound)
@@ -504,6 +503,7 @@ INTDECL (dwarf_getaranges)
 INTDECL (dwarf_getlocation_die)
 INTDECL (dwarf_getsrcfiles)
 INTDECL (dwarf_getsrclines)
+INTDECL (dwarf_get_type)
 INTDECL (dwarf_get_units)
 INTDECL (dwarf_hasattr)
 INTDECL (dwarf_haschildren)
@@ -819,41 +819,49 @@ static inline Dwarf_Abbrev *
 __nonnull_attribute__ (1)
 __libdw_dieabbrev (Dwarf_Die *die, const unsigned char **readp)
 {
+  Dwarf_Abbrev *end_abbrev = DWARF_END_ABBREV;
+  Dwarf_Abbrev *expected = (Dwarf_Abbrev *) NULL;
+
   if (unlikely (die->cu == NULL))
     {
-      die->abbrev = DWARF_END_ABBREV;
-      return DWARF_END_ABBREV;
+      /* __atomic_* compiler builtin functions are used instead of <stdatomic.h>
+	 because the builtins can operate on non-_Atomic types.
+	 Dwarf_Die.abbrev cannot be made _Atomic without possibly breaking ABI
+	 compatibility.  */
+      __atomic_compare_exchange_n (&die->abbrev, &expected, end_abbrev, false,
+				   __ATOMIC_RELEASE, __ATOMIC_ACQUIRE);
+      return end_abbrev;
     }
 
-  rwlock_wrlock (die->cu->abbrev_lock);
-
-  /* Do we need to get the abbreviation, or need to read after the code?  */
-  if (die->abbrev == NULL || readp != NULL)
+  Dwarf_Abbrev *abbrev = __atomic_load_n (&die->abbrev, __ATOMIC_ACQUIRE);
+  if (abbrev == NULL || readp != NULL)
     {
-      /* Get the abbreviation code.  */
+      /* We need to get the abbreviation or need to read after the code.  */
       unsigned int code;
       const unsigned char *addr = die->addr;
-
       if (addr >= (const unsigned char *) die->cu->endp)
 	{
-	  die->abbrev = DWARF_END_ABBREV;
-	  rwlock_unlock (die->cu->abbrev_lock);
-	  return DWARF_END_ABBREV;
+	  __atomic_compare_exchange_n (&die->abbrev, &expected,
+				       end_abbrev, false,
+				       __ATOMIC_RELEASE, __ATOMIC_ACQUIRE);
+	  return end_abbrev;
 	}
 
+      /* Get the abbreviation code.  */
       get_uleb128 (code, addr, die->cu->endp);
       if (readp != NULL)
 	*readp = addr;
 
       /* Find the abbreviation.  */
-      if (die->abbrev == NULL)
-	die->abbrev = __libdw_findabbrev (die->cu, code);
+      if (abbrev == NULL)
+	{
+	  abbrev = __libdw_findabbrev (die->cu, code);
+	  __atomic_compare_exchange_n (&die->abbrev, &expected, abbrev, false,
+				       __ATOMIC_RELEASE, __ATOMIC_ACQUIRE);
+	}
     }
 
-  Dwarf_Abbrev *result = die->abbrev;
-  rwlock_unlock (die->cu->abbrev_lock);
-
-  return result;
+  return abbrev;
 }
 
 /* Helper functions for form handling.  */
@@ -949,8 +957,9 @@ extern int __libdw_visit_scopes (unsigned int depth,
 				 void *arg)
   __nonnull_attribute__ (2, 4) internal_function;
 
-/* Parse a DWARF Dwarf_Block into an array of Dwarf_Op's,
-   and cache the result (via tsearch).  */
+/* Parse a DWARF Dwarf_Block into an array of Dwarf_Op's, and cache the
+   result (via tsearch).  The owner of CACHE (typically a Dwarf_CU or
+   Dwarf_CFI_s) must hold a lock when calling this function.  */
 extern int __libdw_intern_expression (Dwarf *dbg,
 				      bool other_byte_order,
 				      unsigned int address_size,
@@ -1269,6 +1278,8 @@ str_offsets_base_off (Dwarf *dbg, Dwarf_CU *cu)
   uint64_t unit_length;
   uint16_t version;
 
+  if (unlikely (readendp - readp < 4))
+    goto no_header;
   unit_length = read_4ubyte_unaligned_inc (dbg, readp);
   if (unlikely (unit_length == 0xffffffff))
     {
@@ -1358,6 +1369,8 @@ __libdw_cu_ranges_base (Dwarf_CU *cu)
 	      const unsigned char *const dataend
 		= (unsigned char *) data->d_buf + data->d_size;
 
+	      if (unlikely (readp > dataend - 4))
+		goto no_header;
 	      uint64_t unit_length = read_4ubyte_unaligned_inc (dbg, readp);
 	      unsigned int offset_size = 4;
 	      if (unlikely (unit_length == 0xffffffff))
@@ -1441,6 +1454,8 @@ __libdw_cu_locs_base (Dwarf_CU *cu)
 	  const unsigned char *const dataend
 	    = (unsigned char *) data->d_buf + data->d_size;
 
+	  if (unlikely (readp > dataend - 4))
+	    goto no_header;
 	  uint64_t unit_length = read_4ubyte_unaligned_inc (dbg, readp);
 	  unsigned int offset_size = 4;
 	  if (unlikely (unit_length == 0xffffffff))

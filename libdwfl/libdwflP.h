@@ -141,6 +141,9 @@ struct Dwfl
   struct Dwfl_User_Core *user_core;
   char *sysroot;		/* sysroot, or NULL to search standard system
 				   paths */
+
+  /* Serialize debuginfod_client usage.  */
+  mutex_define (, debuginfod_lock);
 };
 
 #define OFFLINE_REDZONE		0x10000
@@ -478,6 +481,10 @@ extern void __libdwfl_module_free (Dwfl_Module *mod) internal_function;
 
 /* Find the main ELF file, update MOD->elferr and/or MOD->main.elf.  */
 extern void __libdwfl_getelf (Dwfl_Module *mod) internal_function;
+
+/* Reset all sh_addr fields to zero for SHF_ALLOC sections if the Elf
+   handle is an ET_REL. Called from libdw_open_elf.  */
+extern void __libdwfl_reset_sh_addr (Elf *elf) internal_function;
 
 /* Process relocations in debugging sections in an ET_REL file.
    FILE must be opened with ELF_C_READ_MMAP_PRIVATE or ELF_C_READ,

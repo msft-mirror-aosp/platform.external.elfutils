@@ -82,6 +82,8 @@ const char* debuginfod_get_url (debuginfod_client *c) { return NULL; }
 int debuginfod_add_http_header (debuginfod_client *c,
 				const char *h) { return -ENOSYS; }
 const char* debuginfod_get_headers (debuginfod_client *c) { return NULL; }
+int debuginfod_default_progressfn (debuginfod_client *c, long a, long b)
+				    { return 0; }
 
 void debuginfod_end (debuginfod_client *c) { }
 
@@ -97,7 +99,7 @@ void debuginfod_end (debuginfod_client *c) { }
 #include <regex.h>
 #include <string.h>
 #include <stdbool.h>
-#include <linux/limits.h>
+#include <limits.h>
 #include <time.h>
 #include <utime.h>
 #include <sys/syscall.h>
@@ -107,6 +109,10 @@ void debuginfod_end (debuginfod_client *c) { }
 #include <curl/curl.h>
 #include <fnmatch.h>
 #include <json-c/json.h>
+
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
 
 /* If fts.h is included before config.h, its indirect inclusions may not
    give us the right LFS aliases of these functions, so map them manually.  */
@@ -227,7 +233,9 @@ static const char *cache_xdg_name = "debuginfod_client";
 /* URLs of debuginfods, separated by url_delim. */
 static const char *url_delim =  " ";
 
-/* Timeout for debuginfods, in seconds (to get at least 100K). */
+/* Timeout for debuginfods, in seconds.  Applies separately to the server
+   connect phase and to download at least 100K once connection is
+   established. */
 static const long default_timeout = 90;
 
 /* Default retry count for download error. */
@@ -752,8 +760,8 @@ add_headers_from_file(debuginfod_client *client, const char* filename)
 
 
 /* Offer a basic form of progress tracing */
-static int
-default_progressfn (debuginfod_client *c, long a, long b)
+int
+debuginfod_default_progressfn (debuginfod_client *c, long a, long b)
 {
   const char* url = debuginfod_get_url (c);
   int len = 0;
@@ -847,7 +855,7 @@ metadata_callback (char * buffer, size_t size, size_t numitems, void * userdata)
  * 'metadata', corresponding to the query type. Returns 0 on success
  * and -Posix error on failure.
  */
-int
+static int
 init_server_urls(char* url_subdir, const char* type,
                  char *server_urls, char ***server_url_list, ima_policy_t **url_ima_policies,
                  int *num_urls, int vfd)
@@ -956,7 +964,7 @@ init_server_urls(char* url_subdir, const char* type,
  * Specifically the data[i] within an array of struct handle_data's.
  * Returns 0 on success and -Posix error on failure.
  */
-int
+static int
 init_handle(debuginfod_client *client,
   size_t (*w_callback)(char *buffer, size_t size, size_t nitems, void *userdata),
   size_t (*h_callback)(char *buffer, size_t size, size_t nitems, void *userdata),
@@ -999,9 +1007,18 @@ init_handle(debuginfod_client *client,
                            timeout);
       curl_easy_setopt_ck (data->handle, CURLOPT_LOW_SPEED_LIMIT,
                            100 * 1024L);
+
+      /* CURLOPT_LOW_SPEED_LIMIT/_TIME don't apply during the server connection
+         phase.  Set CURLOPT_CONNECTTIMEOUT_MS as well so the timeout also
+         limits how long we wait for an unresponsive server.  */
+      long connect_timeout_ms = (timeout > LONG_MAX / 1000L
+                                 ? LONG_MAX : timeout * 1000L);
+      curl_easy_setopt_ck (data->handle, CURLOPT_CONNECTTIMEOUT_MS,
+                           connect_timeout_ms);
     }
   curl_easy_setopt_ck(data->handle, CURLOPT_FILETIME, (long) 1);
   curl_easy_setopt_ck(data->handle, CURLOPT_FOLLOWLOCATION, (long) 1);
+  curl_easy_setopt_ck(data->handle, CURLOPT_MAXREDIRS, (long) 6);
   curl_easy_setopt_ck(data->handle, CURLOPT_FAILONERROR, (long) 1);
   curl_easy_setopt_ck(data->handle, CURLOPT_NOSIGNAL, (long) 1);
   if (h_callback)
@@ -1030,7 +1047,7 @@ init_handle(debuginfod_client *client,
  * once found. If positive maxtime and maxsize dictate the maximum allowed wait times
  * and download sizes respectively. Returns 0 on success and -Posix error on failure.
  */
-int
+static int
 perform_queries(CURLM *curlm, CURL **target_handle, struct handle_data *data, debuginfod_client *c,
                 int num_urls, long maxtime, long maxsize, bool only_one, int vfd, int *committed_to)
 {
@@ -1182,7 +1199,10 @@ perform_queries(CURLM *curlm, CURL **target_handle, struct handle_data *data, de
                 }
               
               if ((*c->progressfn) (c, pa, dl_size == -1 ? 0 : dl_size))
-                break;
+		{
+		  c->progressfn_cancel = true;
+		  break;
+		}
             }
         }
       /* Check to see if we are downloading something which exceeds maxsize, if set.*/
@@ -1545,6 +1565,9 @@ debuginfod_verify_hash(debuginfod_client *c, const unsigned char *hash, int size
   EVP_PKEY_CTX *ctx;
   const EVP_MD *md;
 
+  if (siglen < (int) sizeof(struct signature_v2_hdr))
+    return -EBADMSG;
+
   memcpy(&hdr, sig, sizeof(struct signature_v2_hdr)); /* avoid just aliasing */
 
   if (c->verbose_fd >= 0)
@@ -1627,6 +1650,21 @@ debuginfod_validate_imasig (debuginfod_client *c, int fd)
     if (!hdr_data_len || 1 != sscanf(hdr_data_len + strlen("x-debuginfod-size:") , "%ld", &data_len))
     {
       rc = -ENODATA;
+      goto exit_validate;
+    }
+
+    /* Don't trust the size the server sent us, double check against the
+       file size that we actually got.  That way we calculate the hash
+       over the whole file and not a shorter (possibly empty) data size.  */
+    struct stat st;
+    if (fstat (fd, &st) == -1)
+    {
+      rc = -errno;
+      goto exit_validate;
+    }
+    if (data_len != st.st_size)
+    {
+      rc = -EBADMSG;
       goto exit_validate;
     }
 
@@ -1888,7 +1926,7 @@ debuginfod_query_server_by_buildid (debuginfod_client *c,
     {
       if (vfd >= 0)
 	dprintf (vfd, "checking filename\n");
-      if (filename[0] != '/') // must start with /
+      if (filename[0] == '\0') // must not be empty
 	{
 	  rc = -EINVAL;
 	  goto out;
@@ -2147,7 +2185,9 @@ debuginfod_query_server_by_buildid (debuginfod_client *c,
   size_t escaped_strlen = 0;
   if (filename)
     {
-      escaped_string = curl_easy_escape(&target_handle, filename+1, 0);
+      escaped_string = curl_easy_escape(&target_handle,
+                                        filename[0] == '/' ? filename+1 : filename,
+                                        0);
       if (!escaped_string)
         {
           rc = -ENOMEM;
@@ -2564,7 +2604,7 @@ debuginfod_begin (void)
   if (client != NULL)
     {
       if (getenv(DEBUGINFOD_PROGRESS_ENV_VAR))
-	client->progressfn = default_progressfn;
+	client->progressfn = debuginfod_default_progressfn;
       if (getenv(DEBUGINFOD_VERBOSE_ENV_VAR))
 	client->verbose_fd = STDERR_FILENO;
       else
@@ -2734,6 +2774,8 @@ int debuginfod_find_metadata (debuginfod_client *client,
   int rc = 0, r;
   int vfd = client->verbose_fd;
   struct handle_data *data = NULL;
+
+  client->progressfn_cancel = false;
   
   json_object *json_metadata = json_object_new_object();
   json_bool json_metadata_complete = true;
@@ -3099,7 +3141,7 @@ int debuginfod_add_http_header (debuginfod_client *client, const char* header)
   /* Sanity check header value is of the form Header: Value.
      It should contain at least one colon that isn't the first or
      last character.  */
-  char *colon = strchr (header, ':'); /* first colon */
+  const char *colon = strchr (header, ':'); /* first colon */
   if (colon == NULL /* present */
       || colon == header /* not at beginning - i.e., have a header name */
       || *(colon + 1) == '\0') /* not at end - i.e., have a value */

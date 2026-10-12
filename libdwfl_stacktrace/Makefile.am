@@ -45,7 +45,7 @@ libdwfl_stacktrace_a_SOURCES = dwflst_process_tracker.c \
 			       dwflst_tracker_elftab.c \
 			       dwflst_tracker_dwfltab.c \
 			       libdwfl_stacktrace_next_prime.c \
-			       dwflst_perf_frame.c
+			       dwflst_sample_frame.c
 
 libdwfl_stacktrace = $(libdw)
 libdw = ../libdw/libdw.so
@@ -54,7 +54,7 @@ libebl = ../libebl/libebl.a
 libeu = ../lib/libeu.a
 
 libdwfl_stacktrace_pic_a_SOURCES =
-am_libdwfl_stacktrace_pic_a_OBJECTS = $(libdwfl_stacktrace_a_SOURCES:.c=.os)
+am_libdwfl_stacktrace_pic_a_OBJECTS = $(libdwfl_stacktrace_a_SOURCES:.c=_.os)
 
 noinst_HEADERS = libdwfl_stacktraceP.h \
 		 dwflst_tracker_elftab.h dwflst_tracker_dwfltab.h
