@@ -246,7 +246,18 @@ read_line_header (Dwarf *dbg, unsigned address_size,
     }
   lh->header_start = linep;
 
+  /* The header length is the number of bytes from here to the start of
+     the line number program, so it must stay within the unit (and thus
+     the section).  Without this check a bogus header_length makes
+     read_srcfiles/read_srclines compute an out-of-bounds end pointer
+     (header_start + header_length) and read past the section while
+     parsing the directory and file tables.  */
+  if (unlikely (lh->header_length > (size_t) (lineendp - linep)))
+    goto invalid_data;
+
   /* Next the minimum instruction length.  */
+  if (unlikely ((size_t) (lineendp - linep) < 1))
+    goto invalid_data;
   lh->minimum_instr_len = *linep++;
 
   /* Next the maximum operations per instruction, in version 4 format.  */
@@ -276,6 +287,10 @@ read_line_header (Dwarf *dbg, unsigned address_size,
 
   /* The opcode base.  */
   lh->opcode_base = *linep++;
+
+  /* If the line header uses the NVIDIA CUBIN extension, debug_str_offset's
+     actual value will be read from the last 4 bytes of the header.  */
+  lh->debug_str_offset = 0;
 
   /* Remember array with the standard opcode length (-1 to account for
      the opcode with value zero not being mentioned).  */
@@ -364,7 +379,7 @@ read_srcfiles (Dwarf *dbg,
       const unsigned char *dirp = linep;
       while (dirp < lineendp && *dirp != 0)
 	{
-	  uint8_t *endp = memchr (dirp, '\0', lineendp - dirp);
+	  const uint8_t *endp = memchr (dirp, '\0', lineendp - dirp);
 	  if (endp == NULL)
 	    goto invalid_data;
 	  ++ndirs;
@@ -440,7 +455,7 @@ read_srcfiles (Dwarf *dbg,
       for (unsigned int n = 1; n < ndirlist; n++)
 	{
 	  dirarray[n].dir = (char *) linep;
-	  uint8_t *endp = memchr (linep, '\0', lineendp - linep);
+	  const uint8_t *endp = memchr (linep, '\0', lineendp - linep);
 	  assert (endp != NULL); // Checked above when calculating ndirlist.
 	  dirarray[n].len = endp - linep;
 	  linep = endp + 1;
@@ -927,7 +942,7 @@ read_srclines (Dwarf *dbg,
 	    case DW_LNE_define_file:
 	      {
 		char *fname = (char *) linep;
-		uint8_t *endp = memchr (linep, '\0', lineendp - linep);
+		const uint8_t *endp = memchr (linep, '\0', lineendp - linep);
 		if (endp == NULL)
 		  goto invalid_data;
 		size_t fnamelen = endp - linep;

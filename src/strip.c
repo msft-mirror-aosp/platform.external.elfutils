@@ -1575,7 +1575,10 @@ handle_elf (int fd, Elf *elf, const char *prefix, const char *fname,
 	      if (shdr_info[shdr_info[cnt].shdr.sh_link].idx == 0)
 		{
 		  shdr_info[shdr_info[cnt].shdr.sh_link].idx = 1;
-		  changes |= shdr_info[cnt].shdr.sh_link < cnt;
+		  /* Force another iteration in case we need to propagate this
+		     change to a previous section (either the sh_link section
+		     itself or another section that references it).  */
+		  changes = true;
 		}
 
 	      /* Handle references through sh_info.  */
@@ -1586,7 +1589,11 @@ handle_elf (int fd, Elf *elf, const char *prefix, const char *fname,
 		  else if ( shdr_info[shdr_info[cnt].shdr.sh_info].idx == 0)
 		    {
 		      shdr_info[shdr_info[cnt].shdr.sh_info].idx = 1;
-		      changes |= shdr_info[cnt].shdr.sh_info < cnt;
+		      /* Force another iteration in case we need to propagate
+			 this change to a previous section (either the sh_info
+			 section itself or another section that references
+			 it).  */
+		      changes = true;
 		    }
 		}
 
@@ -2600,10 +2607,12 @@ while computing checksum for debug information"));
 
       if (newehdr->e_ident[EI_CLASS] == ELFCLASS32)
 	{
-	  assert (offsetof (Elf32_Ehdr, e_shentsize) + sizeof (Elf32_Half)
-		  == offsetof (Elf32_Ehdr, e_shnum));
-	  assert (offsetof (Elf32_Ehdr, e_shnum) + sizeof (Elf32_Half)
-		  == offsetof (Elf32_Ehdr, e_shstrndx));
+	  eu_static_assert (offsetof (Elf32_Ehdr, e_shentsize)
+			    + sizeof (Elf32_Half)
+			    == offsetof (Elf32_Ehdr, e_shnum));
+	  eu_static_assert (offsetof (Elf32_Ehdr, e_shnum)
+			    + sizeof (Elf32_Half)
+			    == offsetof (Elf32_Ehdr, e_shstrndx));
 	  const Elf32_Off zero_off = 0;
 	  const Elf32_Half zero[3] = { 0, 0, SHN_UNDEF };
 	  if (pwrite_retry (fd, &zero_off, sizeof zero_off,
@@ -2620,10 +2629,12 @@ while computing checksum for debug information"));
 	}
       else
 	{
-	  assert (offsetof (Elf64_Ehdr, e_shentsize) + sizeof (Elf64_Half)
-		  == offsetof (Elf64_Ehdr, e_shnum));
-	  assert (offsetof (Elf64_Ehdr, e_shnum) + sizeof (Elf64_Half)
-		  == offsetof (Elf64_Ehdr, e_shstrndx));
+	  eu_static_assert (offsetof (Elf64_Ehdr, e_shentsize)
+			    + sizeof (Elf64_Half)
+			    == offsetof (Elf64_Ehdr, e_shnum));
+	  eu_static_assert (offsetof (Elf64_Ehdr, e_shnum)
+			    +sizeof (Elf64_Half)
+			    == offsetof (Elf64_Ehdr, e_shstrndx));
 	  const Elf64_Off zero_off = 0;
 	  const Elf64_Half zero[3] = { 0, 0, SHN_UNDEF };
 	  if (pwrite_retry (fd, &zero_off, sizeof zero_off,

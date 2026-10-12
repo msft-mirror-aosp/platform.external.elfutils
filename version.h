@@ -30,7 +30,12 @@
 #ifndef _ELFUTILS_VERSION_H
 #define _ELFUTILS_VERSION_H	1
 
-#define _ELFUTILS_VERSION	193
+#define _ELFUTILS_VERSION	196
+
+/* _ELFUTILS_THREAD_SAFE is defined to 1 when the elfutils libraries
+   are built with thread safety support enabled.  Otherwise it is left
+   undefined.  */
+/* _ELFUTILS_THREAD_SAFE is not defined.  */
 
 #define _ELFUTILS_PREREQ(major, minor) \
   (_ELFUTILS_VERSION >= ((major) * 1000 + (minor)))

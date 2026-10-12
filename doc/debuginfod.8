@@ -253,6 +253,12 @@ loops in the symbolic directory tree might lead to \fIinfinite
 traversal\fP.
 
 .TP
+.B "\-M LEVELS"  "\-\-max\-depth=LEVELS"
+Limit the depth of directory traversal to \fILEVELS\fP levels
+below the source paths - as in \fIfind\ -maxdepth\fP.
+The default is unlimited depth; minimum is 0.
+
+.TP
 .B "\-\-fdcache\-mbs=MB"
 Configure limits on a cache that keeps recently extracted files from
 archives.  Up to a total of MB megabytes will be kept extracted, in
@@ -311,6 +317,16 @@ in RPM per-file IMA verification on koji repositories. The signatures are retrie
 from the Fedora koji sigcache rpm.sig files as opposed to the original RPM header.
 If a signature cannot be found in the sigcache rpm.sig file, the RPM will be
 tried as a fallback.
+
+.TP
+.B "\-\-home\-redirect"
+Allow for redirecting to a custom URL in case client requests the
+document root.
+
+.TP
+.B "\-\-home\-html"
+Allow for serving a custom text/html FILE in case client requests
+the document root.
 
 .TP
 .B "\-v"
